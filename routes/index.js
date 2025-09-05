@@ -15,8 +15,11 @@ router.get('/connect', AuthController.getConnect);
 router.get('/disconnect', AuthController.getDisconnect);
 router.get('/users/me', UsersController.getMe);
 
-// NEW: upload / create file or folder
 router.post('/files', FilesController.postUpload);
+
+// NEW:
+router.get('/files/:id', FilesController.getShow);
+router.get('/files', FilesController.getIndex);
 
 export default router;
 
