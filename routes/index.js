@@ -1,3 +1,4 @@
+// routes/index.js
 import { Router } from 'express';
 import AppController from '../controllers/AppController.js';
 import UsersController from '../controllers/UsersController.js';
@@ -17,9 +18,9 @@ router.get('/users/me', UsersController.getMe);
 
 router.post('/files', FilesController.postUpload);
 
-// NEW:
-router.get('/files/:id', FilesController.getShow);
+// IMPORTANT: /files list AVANT /files/:id
 router.get('/files', FilesController.getIndex);
+router.get('/files/:id', FilesController.getShow);
 
 export default router;
 

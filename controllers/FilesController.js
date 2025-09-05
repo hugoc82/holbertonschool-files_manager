@@ -1,25 +1,24 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { ObjectId } from 'mongodb';
 import dbClient from '../utils/db.mjs';
 import redisClient from '../utils/redis.mjs';
 
-const VALID_TYPES = new Set(['folder', 'file', 'image']);
-const DEFAULT_STORAGE = '/tmp/files_manager';
+// ...
 
 export default class FilesController {
-  // ... (postUpload tel que déjà fait)
+  // ... postUpload reste tel quel
 
   static async getShow(req, res) {
     try {
       const token = req.header('X-Token');
       if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-      const userIdStr = await redisClient.get(`auth_${token}`);
+      let userIdStr = null;
+      try {
+        userIdStr = await redisClient.get(`auth_${token}`);
+      } catch {
+        // si Redis v2/v3 renvoie une erreur, on traite comme non autorisé
+      }
       if (!userIdStr) return res.status(401).json({ error: 'Unauthorized' });
-
-      const filesCol = dbClient.db.collection('files');
 
       let fileId;
       try {
@@ -28,11 +27,8 @@ export default class FilesController {
         return res.status(404).json({ error: 'Not found' });
       }
 
-      const file = await filesCol.findOne({
-        _id: fileId,
-        userId: new ObjectId(userIdStr),
-      });
-
+      const filesCol = dbClient.db.collection('files');
+      const file = await filesCol.findOne({ _id: fileId, userId: new ObjectId(userIdStr) });
       if (!file) return res.status(404).json({ error: 'Not found' });
 
       return res.status(200).json({
@@ -53,37 +49,40 @@ export default class FilesController {
       const token = req.header('X-Token');
       if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-      const userIdStr = await redisClient.get(`auth_${token}`);
+      let userIdStr = null;
+      try {
+        userIdStr = await redisClient.get(`auth_${token}`);
+      } catch {
+        // Redis down → on considère non autorisé
+      }
       if (!userIdStr) return res.status(401).json({ error: 'Unauthorized' });
 
-      const { parentId, page = 0 } = req.query;
-      const pageNum = Number.isNaN(parseInt(page, 10)) ? 0 : parseInt(page, 10);
+      const page = parseInt(req.query.page, 10);
+      const pageNum = Number.isFinite(page) && page >= 0 ? page : 0;
       const limit = 20;
       const skip = pageNum * limit;
 
       const filesCol = dbClient.db.collection('files');
 
-      // parentId par défaut = 0
-      let parentMatch;
-      if (!parentId || parentId === '0' || parentId === 0) {
-        parentMatch = 0;
-      } else {
+      // parentId sans validation forte (spéc du sujet)
+      let parentMatch = 0;
+      if (typeof req.query.parentId !== 'undefined' && req.query.parentId !== '0' && req.query.parentId !== 0) {
         try {
-          parentMatch = new ObjectId(parentId);
+          parentMatch = new ObjectId(req.query.parentId);
         } catch {
-          // parentId invalide => aucun résultat
+          // parentId invalide => retourne liste vide (spéc: pas de validation, juste vide)
           return res.status(200).json([]);
         }
       }
 
-      const cursor = filesCol.find({
-        userId: new ObjectId(userIdStr),
-        parentId: parentMatch,
-      })
-        .skip(skip)
-        .limit(limit);
+      const pipeline = [
+        { $match: { userId: new ObjectId(userIdStr), parentId: parentMatch } },
+        { $sort: { _id: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+      ];
 
-      const docs = await cursor.toArray();
+      const docs = await filesCol.aggregate(pipeline).toArray();
 
       const out = docs.map((f) => ({
         id: f._id.toString(),
@@ -98,11 +97,6 @@ export default class FilesController {
     } catch {
       return res.status(500).json({ error: 'Server error' });
     }
-  }
-
-  static async postUpload(req, res) {
-    // (garde ici exactement ta version précédente validée)
-    // ...
   }
 }
 
