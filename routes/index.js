@@ -18,14 +18,16 @@ router.get('/connect', AuthController.getConnect);
 router.get('/disconnect', AuthController.getDisconnect);
 router.get('/users/me', UsersController.getMe);
 
-/** Task 5–7: Files */
+/** Task 5–8: Files */
 /* create (upload/folder) */
 router.post('/files', FilesController.postUpload);
-/* list BEFORE id (avoid route shadowing) */
+/* list BEFORE id to avoid route shadowing */
 router.get('/files', FilesController.getIndex);
-/* publish / unpublish BEFORE /files/:id (important) */
+/* publish / unpublish BEFORE /files/:id */
 router.put('/files/:id/publish', FilesController.putPublish);
 router.put('/files/:id/unpublish', FilesController.putUnpublish);
+/* Task 8: data endpoint MUST be before /files/:id */
+router.get('/files/:id/data', FilesController.getFile);
 /* show (last) */
 router.get('/files/:id', FilesController.getShow);
 
