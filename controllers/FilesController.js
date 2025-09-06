@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ObjectId } from 'mongodb';
+import mime from 'mime-types';
 import dbClient from '../utils/db.mjs';
 import redisClient from '../utils/redis.mjs';
 
@@ -204,6 +205,49 @@ export default class FilesController {
         isPublic: !!file.isPublic,
         parentId: normalizeParentIdForResponse(file.parentId),
       });
+    } catch {
+      return res.status(500).json({ error: 'Server error' });
+    }
+  }
+
+  /** Task 8: GET /files/:id/data */
+  static async getFile(req, res) {
+    try {
+      // 1) Chercher le document de fichier par ID
+      let fileId;
+      try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
+
+      const filesCol = dbClient.db.collection('files');
+      const file = await filesCol.findOne({ _id: fileId });
+      if (!file) return res.status(404).json({ error: 'Not found' });
+
+      // 2) Si non public, il faut être authentifié ET propriétaire
+      if (!file.isPublic) {
+        const userIdStr = await authUserId(req);
+        if (!userIdStr) return res.status(404).json({ error: 'Not found' }); // spec: pas 401
+        if (file.userId?.toString() !== userIdStr) return res.status(404).json({ error: 'Not found' });
+      }
+
+      // 3) Si c'est un dossier -> 400
+      if (file.type === 'folder') {
+        return res.status(400).json({ error: "A folder doesn't have content" });
+      }
+
+      // 4) Vérifier que le fichier local existe
+      if (!file.localPath) return res.status(404).json({ error: 'Not found' });
+
+      try {
+        await fs.access(file.localPath);
+      } catch {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      // 5) Déterminer le MIME type par le nom
+      const contentType = mime.lookup(file.name) || 'application/octet-stream';
+      const data = await fs.readFile(file.localPath);
+
+      res.setHeader('Content-Type', contentType);
+      return res.status(200).send(data);
     } catch {
       return res.status(500).json({ error: 'Server error' });
     }
