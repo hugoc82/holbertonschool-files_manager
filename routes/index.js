@@ -23,7 +23,7 @@ router.get('/users/me', UsersController.getMe);
 router.post('/files', FilesController.postUpload);
 /* list BEFORE id (avoid route shadowing) */
 router.get('/files', FilesController.getIndex);
-/* publish / unpublish BEFORE /files/:id */
+/* publish / unpublish BEFORE /files/:id (important) */
 router.put('/files/:id/publish', FilesController.putPublish);
 router.put('/files/:id/unpublish', FilesController.putUnpublish);
 /* show (last) */

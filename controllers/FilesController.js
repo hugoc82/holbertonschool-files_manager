@@ -9,7 +9,7 @@ import redisClient from '../utils/redis.mjs';
 const VALID_TYPES = new Set(['folder', 'file', 'image']);
 const DEFAULT_STORAGE = '/tmp/files_manager';
 
-// ---- helpers (pas de #private pour compat Babel 6) ----
+/** Helpers (compatibles Babel 6 — pas de champs privés) */
 async function authUserId(req) {
   const token = req.header('X-Token');
   if (!token) return null;
@@ -26,7 +26,7 @@ function normalizeParentIdForResponse(parentId) {
 }
 
 export default class FilesController {
-  // ===== Task 5: postUpload =====
+  /** Task 5: POST /files (upload/create) */
   static async postUpload(req, res) {
     try {
       const userIdStr = await authUserId(req);
@@ -43,6 +43,7 @@ export default class FilesController {
 
       const filesCol = dbClient.db.collection('files');
 
+      // Parent checks
       let parentDoc = null;
       let parentIdToStore = 0;
       if (parentId && parentId !== 0 && parentId !== '0') {
@@ -74,6 +75,7 @@ export default class FilesController {
         });
       }
 
+      // Stockage fichier/image
       const rootFolder = (process.env.FOLDER_PATH && process.env.FOLDER_PATH.trim())
         ? process.env.FOLDER_PATH.trim()
         : DEFAULT_STORAGE;
@@ -102,13 +104,15 @@ export default class FilesController {
     }
   }
 
-  // ===== Task 6: getShow =====
+  /** Task 6: GET /files/:id */
   static async getShow(req, res) {
     try {
       const userIdStr = await authUserId(req);
       if (!userIdStr) return res.status(401).json({ error: 'Unauthorized' });
 
-      let fileId; try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
+      let fileId;
+      try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
+
       const filesCol = dbClient.db.collection('files');
       const file = await filesCol.findOne({ _id: fileId, userId: new ObjectId(userIdStr) });
       if (!file) return res.status(404).json({ error: 'Not found' });
@@ -126,7 +130,7 @@ export default class FilesController {
     }
   }
 
-  // ===== Task 6: getIndex =====
+  /** Task 6: GET /files (list + pagination) */
   static async getIndex(req, res) {
     try {
       const userIdStr = await authUserId(req);
@@ -139,7 +143,8 @@ export default class FilesController {
 
       let parentMatch = 0;
       if (typeof req.query.parentId !== 'undefined' && req.query.parentId !== '0' && req.query.parentId !== 0) {
-        try { parentMatch = new ObjectId(req.query.parentId); } catch { return res.status(200).json([]); }
+        try { parentMatch = new ObjectId(req.query.parentId); }
+        catch { return res.status(200).json([]); }
       }
 
       const filesCol = dbClient.db.collection('files');
@@ -165,21 +170,24 @@ export default class FilesController {
     }
   }
 
-  // ===== Task 7: publish / unpublish =====
+  /** Task 7: PUT /files/:id/publish */
   static async putPublish(req, res) {
     return FilesController._togglePublic(req, res, true);
   }
 
+  /** Task 7: PUT /files/:id/unpublish */
   static async putUnpublish(req, res) {
     return FilesController._togglePublic(req, res, false);
   }
 
+  /** Compat checker : pas de méthode privée (#) */
   static async _togglePublic(req, res, makePublic) {
     try {
       const userIdStr = await authUserId(req);
       if (!userIdStr) return res.status(401).json({ error: 'Unauthorized' });
 
-      let fileId; try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
+      let fileId;
+      try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
 
       const filesCol = dbClient.db.collection('files');
       const filter = { _id: fileId, userId: new ObjectId(userIdStr) };
