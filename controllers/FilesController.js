@@ -4,11 +4,15 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ObjectId } from 'mongodb';
 import mime from 'mime-types';
+import Queue from 'bull';
 import dbClient from '../utils/db.mjs';
 import redisClient from '../utils/redis.mjs';
 
 const VALID_TYPES = new Set(['folder', 'file', 'image']);
 const DEFAULT_STORAGE = '/tmp/files_manager';
+
+// Bull queue pour les thumbnails (Bull v3, Redis local)
+const fileQueue = new Queue('fileQueue');
 
 /** Helpers (compatibles Babel 6 — pas de champs privés) */
 async function authUserId(req) {
@@ -27,7 +31,7 @@ function normalizeParentIdForResponse(parentId) {
 }
 
 export default class FilesController {
-  /** Task 5: POST /files (upload/create) */
+  /** Task 5: POST /files (upload/create) + Task 9: enqueue thumbnails for images */
   static async postUpload(req, res) {
     try {
       const userIdStr = await authUserId(req);
@@ -64,6 +68,7 @@ export default class FilesController {
         parentId: parentIdToStore || 0,
       };
 
+      // Folder: insert direct
       if (type === 'folder') {
         const result = await filesCol.insertOne(baseDoc);
         return res.status(201).json({
@@ -76,7 +81,7 @@ export default class FilesController {
         });
       }
 
-      // Stockage fichier/image
+      // file/image: write to disk
       const rootFolder = (process.env.FOLDER_PATH && process.env.FOLDER_PATH.trim())
         ? process.env.FOLDER_PATH.trim()
         : DEFAULT_STORAGE;
@@ -91,6 +96,18 @@ export default class FilesController {
 
       const fileDoc = { ...baseDoc, localPath };
       const result = await filesCol.insertOne(fileDoc);
+
+      // Task 9: si image => ajouter un job Bull (userId + fileId)
+      if (type === 'image') {
+        try {
+          await fileQueue.add({
+            userId: user._id.toString(),
+            fileId: result.insertedId.toString(),
+          });
+        } catch {
+          // On n'échoue pas l'upload si la queue n'est pas joignable
+        }
+      }
 
       return res.status(201).json({
         id: result.insertedId.toString(),
@@ -210,10 +227,10 @@ export default class FilesController {
     }
   }
 
-  /** Task 8: GET /files/:id/data */
+  /** Task 8 (+9): GET /files/:id/data (support du param size) */
   static async getFile(req, res) {
     try {
-      // 1) Chercher le document de fichier par ID
+      // 1) Chercher le document par ID
       let fileId;
       try { fileId = new ObjectId(req.params.id); } catch { return res.status(404).json({ error: 'Not found' }); }
 
@@ -221,31 +238,35 @@ export default class FilesController {
       const file = await filesCol.findOne({ _id: fileId });
       if (!file) return res.status(404).json({ error: 'Not found' });
 
-      // 2) Si non public, il faut être authentifié ET propriétaire
+      // 2) Autorisations: si non public => il faut être authentifié ET propriétaire
       if (!file.isPublic) {
         const userIdStr = await authUserId(req);
-        if (!userIdStr) return res.status(404).json({ error: 'Not found' }); // spec: pas 401
+        if (!userIdStr) return res.status(404).json({ error: 'Not found' }); // spec: 404, pas 401
         if (file.userId?.toString() !== userIdStr) return res.status(404).json({ error: 'Not found' });
       }
 
-      // 3) Si c'est un dossier -> 400
+      // 3) Dossier => 400
       if (file.type === 'folder') {
         return res.status(400).json({ error: "A folder doesn't have content" });
       }
 
-      // 4) Vérifier que le fichier local existe
+      // 4) Chemin local (support du size = 100 | 250 | 500)
       if (!file.localPath) return res.status(404).json({ error: 'Not found' });
+      const size = parseInt(req.query.size, 10);
+      const allowed = [100, 250, 500];
+      let localPath = file.localPath;
+      if (allowed.includes(size)) {
+        localPath = `${file.localPath}_${size}`;
+      }
 
       try {
-        await fs.access(file.localPath);
+        await fs.access(localPath);
       } catch {
         return res.status(404).json({ error: 'Not found' });
       }
 
-      // 5) Déterminer le MIME type par le nom
       const contentType = mime.lookup(file.name) || 'application/octet-stream';
-      const data = await fs.readFile(file.localPath);
-
+      const data = await fs.readFile(localPath);
       res.setHeader('Content-Type', contentType);
       return res.status(200).send(data);
     } catch {
